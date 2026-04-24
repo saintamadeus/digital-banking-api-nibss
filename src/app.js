@@ -11,6 +11,18 @@ const onboardingRoutes = require('./modules/onboarding/onboarding.routes');
 const accountRoutes = require('./modules/accounts/accounts.routes');
 const transactionRoutes = require('./modules/transactions/transactions.routes');
 
+const { getNibssToken, clearTokenCache } = require('./config/nibss');
+
+app.get('/test-nibss-token', async (req, res) => {
+  try {
+    clearTokenCache(); // Force fresh token every time
+    const token = await getNibssToken();
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/accounts', accountRoutes);

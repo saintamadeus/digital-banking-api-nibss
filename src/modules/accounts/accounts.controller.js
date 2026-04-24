@@ -7,7 +7,6 @@ async function createAccount(req, res) {
   const { dob } = req.body;
 
   try {
-    // Check customer is verified
     const customerResult = await pool.query(
       'SELECT * FROM customers WHERE id = $1',
       [customerId]
@@ -18,7 +17,6 @@ async function createAccount(req, res) {
       return res.status(403).json({ error: 'Complete BVN or NIN verification before creating an account' });
     }
 
-    // Check customer doesn't already have an account
     const existingAccount = await pool.query(
       'SELECT id FROM accounts WHERE customer_id = $1',
       [customerId]
@@ -31,13 +29,10 @@ async function createAccount(req, res) {
       return res.status(400).json({ error: 'dob is required' });
     }
 
-    // Determine KYC type and ID
-const kycType = customer.bvn ? 'BVN' : 'NIN';
-const kycID = customer.bvn || customer.nin;
+    const kycType = customer.bvn ? 'bvn' : 'nin';
+    const kycID = customer.bvn || customer.nin;
+    const token = await getNibssToken();
 
-const token = await getNibssToken();
-
-    // Create account on NibssByPhoenix
     const response = await axios.post(`${BASE_URL}/api/account/create`, {
       kycType,
       kycID,
@@ -46,13 +41,11 @@ const token = await getNibssToken();
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const accountNumber = response.data.accountNumber;
-
+const accountNumber = response.data.account.accountNumber;
     if (!accountNumber) {
       return res.status(500).json({ error: 'Account creation failed — no account number returned' });
     }
 
-    // Store account in our DB
     await pool.query(
       'INSERT INTO accounts (customer_id, account_number) VALUES ($1, $2)',
       [customerId, accountNumber]

@@ -64,20 +64,23 @@ async function transfer(req, res) {
     });
 
     // Log transaction in our DB
-    await pool.query(
-      `INSERT INTO transactions 
-        (customer_id, reference, type, amount, recipient_account, status, narration)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        customerId,
-        reference,
-        'transfer',
-        amount,
-        to,
-        'success',
-        narration || null,
-      ]
-    );
+    const nibssReference = response.data.reference;
+
+await pool.query(
+  `INSERT INTO transactions 
+    (customer_id, reference, nibss_reference, type, amount, recipient_account, status, narration)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+  [
+    customerId,
+    reference,
+    nibssReference,
+    'transfer',
+    amount,
+    to,
+    'success',
+    narration || null,
+  ]
+);
 
     return res.status(200).json({
       message: 'Transfer successful',
@@ -124,7 +127,6 @@ async function getTransactionStatus(req, res) {
   const customerId = req.customer.id;
 
   try {
-    // Enforce data privacy — only allow access to own transactions
     const localTx = await pool.query(
       'SELECT * FROM transactions WHERE reference = $1 AND customer_id = $2',
       [ref, customerId]
@@ -134,9 +136,11 @@ async function getTransactionStatus(req, res) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
+    const nibssRef = localTx.rows[0].nibss_reference;
     const token = await getNibssToken();
+
     const response = await axios.get(
-      `${BASE_URL}/api/transaction/${ref}`,
+      `${BASE_URL}/api/transaction/${nibssRef}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
