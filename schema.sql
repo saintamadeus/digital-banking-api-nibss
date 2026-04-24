@@ -1,3 +1,10 @@
+-- TIT Bank Digital Banking API
+-- Run this file to set up the PostgreSQL database schema
+
+CREATE DATABASE digital_banking;
+
+\c digital_banking
+
 CREATE TABLE customers (
   id SERIAL PRIMARY KEY,
   full_name VARCHAR(255) NOT NULL,
