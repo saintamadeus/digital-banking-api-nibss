@@ -23,12 +23,12 @@ async function verifyBvn(req, res) {
     const token = await getNibssToken();
     const headers = { Authorization: `Bearer ${token}` };
 
-    // Step 1: Insert BVN record
+    // Insert BVN record
     await axios.post(`${BASE_URL}/api/insertBvn`, {
       bvn, firstName, lastName, dob, phone
     }, { headers });
 
-    // Step 2: Validate BVN
+    // Validate BVN
     const validation = await axios.post(`${BASE_URL}/api/validateBvn`, 
       { bvn }, 
       { headers }
@@ -38,7 +38,7 @@ async function verifyBvn(req, res) {
       return res.status(400).json({ error: 'BVN validation failed' });
     }
 
-    // Step 3: Mark customer as verified in our DB
+    // Mark customer as verified in our DB
     await pool.query(
       'UPDATE customers SET is_verified = true, bvn = $1 WHERE id = $2',
       [bvn, customerId]
@@ -76,12 +76,12 @@ async function verifyNin(req, res) {
     const token = await getNibssToken();
     const headers = { Authorization: `Bearer ${token}` };
 
-    // Step 1: Insert NIN record
+    // Insert NIN record
     await axios.post(`${BASE_URL}/api/insertNin`, {
       nin, firstName, lastName, dob
     }, { headers });
 
-    // Step 2: Validate NIN
+    // Validate NIN
     const validation = await axios.post(`${BASE_URL}/api/validateNin`,
       { nin },
       { headers }
@@ -91,7 +91,7 @@ async function verifyNin(req, res) {
       return res.status(400).json({ error: 'NIN validation failed' });
     }
 
-    // Step 3: Mark customer as verified
+    // Mark customer as verified
     await pool.query(
       'UPDATE customers SET is_verified = true, nin = $1 WHERE id = $2',
       [nin, customerId]
