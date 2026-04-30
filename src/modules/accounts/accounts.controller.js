@@ -1,102 +1,31 @@
-const axios = require('axios');
-const pool = require('../../config/db');
-const { getNibssToken, BASE_URL } = require('../../config/nibss');
+const accountsService = require('./accounts.service');
+const { createAccountSchema, validateQuery } = require('../../utils/validators');
+const { HTTP_STATUS } = require('../../utils/constants');
+const AppError = require('../../utils/appError');
 
-async function createAccount(req, res) {
-  const customerId = req.customer.id;
-  const { dob } = req.body;
-
+async function createAccount(req, res, next) {
   try {
-    const customerResult = await pool.query(
-      'SELECT * FROM customers WHERE id = $1',
-      [customerId]
-    );
-    const customer = customerResult.rows[0];
-
-    if (!customer.is_verified) {
-      return res.status(403).json({ error: 'Complete BVN or NIN verification before creating an account' });
+    const { valid, errors, value } = validateQuery(createAccountSchema, req.body);
+    if (!valid) {
+      throw new AppError(errors.join(', '), HTTP_STATUS.BAD_REQUEST);
     }
 
-    const existingAccount = await pool.query(
-      'SELECT id FROM accounts WHERE customer_id = $1',
-      [customerId]
-    );
-    if (existingAccount.rows.length > 0) {
-      return res.status(409).json({ error: 'Customer already has an account' });
-    }
-
-    if (!dob) {
-      return res.status(400).json({ error: 'dob is required' });
-    }
-
-    const kycType = customer.bvn ? 'bvn' : 'nin';
-    const kycID = customer.bvn || customer.nin;
-    const token = await getNibssToken();
-
-    const response = await axios.post(`${BASE_URL}/api/account/create`, {
-      kycType,
-      kycID,
-      dob,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-const accountNumber = response.data.account.accountNumber;
-    if (!accountNumber) {
-      return res.status(500).json({ error: 'Account creation failed — no account number returned' });
-    }
-
-    await pool.query(
-      'INSERT INTO accounts (customer_id, account_number) VALUES ($1, $2)',
-      [customerId, accountNumber]
-    );
-
-    return res.status(201).json({
-      message: 'Account created successfully',
-      account: {
-        account_number: accountNumber,
-        customer_name: customer.full_name,
-      },
-    });
+    const result = await accountsService.createAccount(req.customer.id, value.dob);
+    res.status(HTTP_STATUS.CREATED).json(result);
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    return res.status(500).json({
-      error: err?.response?.data?.message || 'Account creation failed',
-    });
+    next(err);
   }
 }
 
-async function getBalance(req, res) {
-  const customerId = req.customer.id;
-
+async function getBalance(req, res, next) {
   try {
-    const accountResult = await pool.query(
-      'SELECT account_number FROM accounts WHERE customer_id = $1',
-      [customerId]
-    );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No account found for this customer' });
-    }
-
-    const accountNumber = accountResult.rows[0].account_number;
-    const token = await getNibssToken();
-
-    const response = await axios.get(
-      `${BASE_URL}/api/account/balance/${accountNumber}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    return res.status(200).json({
-      account_number: accountNumber,
-      balance: response.data,
-    });
+    const result = await accountsService.getBalance(req.customer.id);
+    res.status(HTTP_STATUS.OK).json(result);
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    return res.status(500).json({
-      error: err?.response?.data?.message || 'Could not retrieve balance',
-    });
+    next(err);
   }
 }
+
+module.exports = { createAccount, getBalance };
 
 module.exports = { createAccount, getBalance };

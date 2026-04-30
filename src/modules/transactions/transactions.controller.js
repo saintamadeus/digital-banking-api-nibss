@@ -1,180 +1,56 @@
-const axios = require('axios');
-const pool = require('../../config/db');
-const { getNibssToken, BASE_URL } = require('../../config/nibss');
-const { v4: uuidv4 } = require('uuid');
+const transactionsService = require('./transactions.service');
+const { transferSchema, validateQuery } = require('../../utils/validators');
+const { HTTP_STATUS, PAGINATION } = require('../../utils/constants');
+const AppError = require('../../utils/appError');
 
-async function nameEnquiry(req, res) {
-  const { accountNumber } = req.params;
-
+async function nameEnquiry(req, res, next) {
   try {
-    const token = await getNibssToken();
-    const response = await axios.get(
-      `${BASE_URL}/api/account/name-enquiry/${accountNumber}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    return res.status(200).json(response.data);
+    const { accountNumber } = req.params;
+    const result = await transactionsService.nameEnquiry(accountNumber);
+    res.status(HTTP_STATUS.OK).json(result);
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    return res.status(err?.response?.status || 500).json({
-      error: err?.response?.data?.message || 'Name enquiry failed',
-    });
+    next(err);
   }
 }
 
-async function transfer(req, res) {
-  const customerId = req.customer.id;
-  const { to, amount, narration } = req.body;
-
-  if (!to || !amount) {
-    return res.status(400).json({ error: 'to and amount are required' });
-  }
-
-  if (amount <= 0) {
-    return res.status(400).json({ error: 'Amount must be greater than 0' });
-  }
-
+async function transfer(req, res, next) {
   try {
-    // Get sender's account number from our DB
-    const accountResult = await pool.query(
-      'SELECT account_number FROM accounts WHERE customer_id = $1',
-      [customerId]
+    const { valid, errors, value } = validateQuery(transferSchema, req.body);
+    if (!valid) {
+      throw new AppError(errors.join(', '), HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const result = await transactionsService.transfer(
+      req.customer.id,
+      value.to,
+      value.amount,
+      value.narration
     );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ error: 'You do not have a bank account' });
-    }
-
-    const from = accountResult.rows[0].account_number;
-
-    if (from === to) {
-      return res.status(400).json({ error: 'Cannot transfer to your own account' });
-    }
-
-    const reference = uuidv4();
-    const token = await getNibssToken();
-
-    // Execute transfer on NibssByPhoenix
-    const response = await axios.post(`${BASE_URL}/api/transfer`, {
-      from,
-      to,
-      amount,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    // Log transaction in our DB
-    const nibssReference = response.data.reference;
-
-await pool.query(
-  `INSERT INTO transactions 
-    (customer_id, reference, nibss_reference, type, amount, recipient_account, status, narration)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-  [
-    customerId,
-    reference,
-    nibssReference,
-    'transfer',
-    amount,
-    to,
-    'success',
-    narration || null,
-  ]
-);
-
-    return res.status(200).json({
-      message: 'Transfer successful',
-      reference,
-      data: response.data,
-    });
+    res.status(HTTP_STATUS.OK).json(result);
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-
-    // Still log failed transaction
-    try {
-      const accountResult = await pool.query(
-        'SELECT account_number FROM accounts WHERE customer_id = $1',
-        [customerId]
-      );
-      if (accountResult.rows.length > 0) {
-        await pool.query(
-          `INSERT INTO transactions 
-            (customer_id, reference, type, amount, recipient_account, status, narration)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            customerId,
-            uuidv4(),
-            'transfer',
-            req.body.amount,
-            req.body.to,
-            'failed',
-            req.body.narration || null,
-          ]
-        );
-      }
-    } catch (logErr) {
-      console.error('Failed to log transaction:', logErr.message);
-    }
-
-    return res.status(err?.response?.status || 500).json({
-      error: err?.response?.data?.message || 'Transfer failed',
-    });
+    next(err);
   }
 }
 
-async function getTransactionStatus(req, res) {
-  const { ref } = req.params;
-  const customerId = req.customer.id;
-
+async function getTransactionStatus(req, res, next) {
   try {
-    const localTx = await pool.query(
-      'SELECT * FROM transactions WHERE reference = $1 AND customer_id = $2',
-      [ref, customerId]
-    );
-
-    if (localTx.rows.length === 0) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-
-    const nibssRef = localTx.rows[0].nibss_reference;
-    const token = await getNibssToken();
-
-    const response = await axios.get(
-      `${BASE_URL}/api/transaction/${nibssRef}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    return res.status(200).json({
-      local: localTx.rows[0],
-      nibss: response.data,
-    });
+    const { ref } = req.params;
+    const result = await transactionsService.getTransactionStatus(req.customer.id, ref);
+    res.status(HTTP_STATUS.OK).json(result);
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    return res.status(err?.response?.status || 500).json({
-      error: err?.response?.data?.message || 'Could not retrieve transaction status',
-    });
+    next(err);
   }
 }
 
-async function getTransactionHistory(req, res) {
-  const customerId = req.customer.id;
-
+async function getTransactionHistory(req, res, next) {
   try {
-    const result = await pool.query(
-      `SELECT id, reference, type, amount, recipient_account, status, narration, created_at
-       FROM transactions
-       WHERE customer_id = $1
-       ORDER BY created_at DESC`,
-      [customerId]
-    );
+    const page = parseInt(req.query.page) || PAGINATION.DEFAULT_PAGE;
+    const limit = parseInt(req.query.limit) || PAGINATION.DEFAULT_LIMIT;
 
-    return res.status(200).json({
-      count: result.rows.length,
-      transactions: result.rows,
-    });
+    const result = await transactionsService.getTransactionHistory(req.customer.id, page, limit);
+    res.status(HTTP_STATUS.OK).json(result);
   } catch (err) {
-    console.error(err.message);
-    return res.status(500).json({ error: 'Could not retrieve transaction history' });
+    next(err);
   }
 }
 
